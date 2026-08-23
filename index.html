@@ -838,7 +838,26 @@ const MCT_DATA = {"altitudes":[0,5000,10000],"temps":[-40,-30,-20,-10,0,10,20,30
   }
 
   function csvSplit(line){
-    return line.split(',').map(s => s.replace(/^"|"$/g,'').trim());
+    const result = [];
+    let cur = '';
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++){
+      const c = line[i];
+      if (inQuotes){
+        if (c === '"'){
+          if (line[i+1] === '"'){ cur += '"'; i++; }
+          else { inQuotes = false; }
+        } else {
+          cur += c;
+        }
+      } else {
+        if (c === '"'){ inQuotes = true; }
+        else if (c === ','){ result.push(cur.trim()); cur = ''; }
+        else { cur += c; }
+      }
+    }
+    result.push(cur.trim());
+    return result;
   }
 
   async function lookupIcaoRunways(code){
