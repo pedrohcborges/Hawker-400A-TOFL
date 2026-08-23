@@ -972,20 +972,21 @@ const MCT_DATA = {"altitudes":[0,5000,10000],"temps":[-40,-30,-20,-10,0,10,20,30
   async function findNearestAirport(lat, lon){
     const text = await fetchAirportsCsv();
     const lines = text.split('\n');
+    const badTypes = new Set(['heliport','seaplane_base','balloonport','closed']);
     let best = null, bestDist = Infinity;
     for (let i = 1; i < lines.length; i++){
       const line = lines[i];
       if (!line) continue;
-      if (line.indexOf('large_airport') === -1 && line.indexOf('medium_airport') === -1) continue;
+      if (line.indexOf('_airport') === -1) continue;
       const cols = csvSplit(line);
       const type = cols[2];
-      if (type !== 'large_airport' && type !== 'medium_airport') continue;
+      if (badTypes.has(type) || !type.endsWith('_airport')) continue;
       const plat = parseFloat(cols[4]), plon = parseFloat(cols[5]);
       if (isNaN(plat) || isNaN(plon)) continue;
       const icao = (cols[12] || cols[1] || '').toUpperCase();
       if (!/^[A-Z0-9]{3,4}$/.test(icao)) continue;
       const d = haversineNm(lat, lon, plat, plon);
-      if (d < bestDist){ bestDist = d; best = { icao, name: cols[3], dist: d }; }
+      if (d < bestDist){ bestDist = d; best = { icao, name: cols[3], type, dist: d }; }
     }
     return best;
   }
@@ -1017,7 +1018,7 @@ const MCT_DATA = {"altitudes":[0,5000,10000],"temps":[-40,-30,-20,-10,0,10,20,30
     }, (err) => {
       btn.disabled = false;
       statusEl.textContent = 'Não foi possível obter sua localização (permissão negada ou indisponível).';
-    }, { enableHighAccuracy: false, timeout: 12000 });
+    }, { enableHighAccuracy: true, timeout: 15000 });
   });
 
   recalc();
