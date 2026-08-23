@@ -140,6 +140,7 @@
   }
   .icaobtn:hover{ background:linear-gradient(180deg,#213627,#1a2620); }
   .icaobtn:disabled{ opacity:.5; cursor:wait; }
+  .icaobtn-geo{ padding:0 14px; font-size:16px; }
   .icaoResults{ display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
   .icaochip{
     font-family:var(--mono); font-size:11.5px; padding:6px 10px; border-radius:4px;
@@ -272,6 +273,7 @@
             <input type="text" id="icaoCode" placeholder="ex: SBGR" maxlength="4" style="text-transform:uppercase;">
           </div>
           <button id="icaoSearchBtn" class="icaobtn">Buscar</button>
+          <button id="icaoGeoBtn" class="icaobtn icaobtn-geo" title="Usar minha localização">📍</button>
         </div>
         <div id="icaoStatus" class="range">Preenche altitude e pista automaticamente.</div>
         <div id="icaoResults" class="icaoResults"></div>
@@ -888,11 +890,12 @@ const MCT_DATA = {"altitudes":[0,5000,10000],"temps":[-40,-30,-20,-10,0,10,20,30
     $('alt').value = Math.round(elevFt);
   }
 
-  $('icaoSearchBtn').addEventListener('click', doIcaoSearch);
+  $('icaoSearchBtn').addEventListener('click', () => doIcaoSearch());
   $('icaoCode').addEventListener('keydown', (e) => { if (e.key === 'Enter') doIcaoSearch(); });
 
-  async function doIcaoSearch(){
-    const code = $('icaoCode').value.trim().toUpperCase();
+  async function doIcaoSearch(prefetchedCode){
+    const code = (prefetchedCode || $('icaoCode').value.trim()).toUpperCase();
+    if (prefetchedCode) $('icaoCode').value = code;
     const statusEl = $('icaoStatus');
     const resultsEl = $('icaoResults');
     resultsEl.innerHTML = '';
@@ -956,6 +959,66 @@ const MCT_DATA = {"altitudes":[0,5000,10000],"temps":[-40,-30,-20,-10,0,10,20,30
       btn.textContent = 'Buscar';
     }
   }
+
+  // ---- Geolocation: find nearest airport ----
+  function haversineNm(lat1, lon1, lat2, lon2){
+    const R = 3440.065; // nm
+    const toRad = d => d * Math.PI/180;
+    const dLat = toRad(lat2-lat1), dLon = toRad(lon2-lon1);
+    const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;
+    return 2*R*Math.asin(Math.sqrt(a));
+  }
+
+  async function findNearestAirport(lat, lon){
+    const text = await fetchAirportsCsv();
+    const lines = text.split('\n');
+    let best = null, bestDist = Infinity;
+    for (let i = 1; i < lines.length; i++){
+      const line = lines[i];
+      if (!line) continue;
+      if (line.indexOf('large_airport') === -1 && line.indexOf('medium_airport') === -1) continue;
+      const cols = csvSplit(line);
+      const type = cols[2];
+      if (type !== 'large_airport' && type !== 'medium_airport') continue;
+      const plat = parseFloat(cols[4]), plon = parseFloat(cols[5]);
+      if (isNaN(plat) || isNaN(plon)) continue;
+      const icao = (cols[12] || cols[1] || '').toUpperCase();
+      if (!/^[A-Z0-9]{3,4}$/.test(icao)) continue;
+      const d = haversineNm(lat, lon, plat, plon);
+      if (d < bestDist){ bestDist = d; best = { icao, name: cols[3], dist: d }; }
+    }
+    return best;
+  }
+
+  $('icaoGeoBtn').addEventListener('click', () => {
+    const statusEl = $('icaoStatus');
+    if (!navigator.geolocation){
+      statusEl.textContent = 'Geolocalização não suportada neste navegador.';
+      return;
+    }
+    const btn = $('icaoGeoBtn');
+    btn.disabled = true;
+    statusEl.textContent = 'Obtendo sua localização…';
+    navigator.geolocation.getCurrentPosition(async (pos) => {
+      statusEl.textContent = 'Buscando aeroporto mais próximo…';
+      try {
+        const best = await findNearestAirport(pos.coords.latitude, pos.coords.longitude);
+        btn.disabled = false;
+        if (!best){
+          statusEl.textContent = 'Nenhum aeroporto encontrado perto de você.';
+          return;
+        }
+        statusEl.textContent = 'Aeroporto mais próximo: ' + best.icao + ' (' + Math.round(best.dist) + ' nm) — ' + (best.name||'') + '.';
+        await doIcaoSearch(best.icao);
+      } catch (err){
+        btn.disabled = false;
+        statusEl.textContent = 'Não foi possível buscar o aeroporto mais próximo agora.';
+      }
+    }, (err) => {
+      btn.disabled = false;
+      statusEl.textContent = 'Não foi possível obter sua localização (permissão negada ou indisponível).';
+    }, { enableHighAccuracy: false, timeout: 12000 });
+  });
 
   recalc();
 })();
