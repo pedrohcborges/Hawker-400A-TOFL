@@ -1277,23 +1277,30 @@ const MCT_DATA = {"altitudes":[0,5000,10000],"temps":[-40,-30,-20,-10,0,10,20,30
       html += '</div>';
 
       const override = AIRPORT_OVERRIDES[code];
-      const hasHeadings = override && override.runways.length && override.runways[0].le && override.runways[0].he;
+      let rw = null, rwSource = null;
+      if (override && override.runways.length && override.runways[0].le && override.runways[0].he){
+        rw = override.runways[0]; rwSource = 'override';
+      } else {
+        const fallbackRunways = await lookupIcaoRunways(code);
+        const withHeadings = fallbackRunways.find(r => r.le && r.he);
+        if (withHeadings){ rw = withHeadings; rwSource = withHeadings._source; }
+      }
+      const hasHeadings = !!rw;
 
       if (hasHeadings && m.windDir !== null && !m.windVar){
-        const rw = override.runways[0];
         const leHdg = parseInt(rw.le,10) * 10;
         const heHdg = parseInt(rw.he,10) * 10;
         const leComp = windComponents(m.windDir, m.windSpeed, leHdg);
         const heComp = windComponents(m.windDir, m.windSpeed, heHdg);
         const favorsLe = leComp.headwind >= heComp.headwind;
         const best = favorsLe ? { label: rw.le, ...leComp } : { label: rw.he, ...heComp };
-        const worst = favorsLe ? heComp : leComp;
 
         html += '<div class="runwayDiagram">' + buildRunwayWindSVG(leHdg, heHdg, rw.le, rw.he, m.windDir, m.windSpeed, favorsLe) + '</div>';
         html += '<div class="rwyRecommend">Melhor pista para decolagem: <b>' + best.label + '</b><br>';
         html += 'Componente: ' + (best.headwind >= 0 ? 'vento de proa ' + Math.abs(best.headwind) : 'vento de cauda ' + Math.abs(best.headwind)) + ' kt, través ' + Math.abs(best.crosswind) + ' kt';
         if (m.windGust) html += ' (rajada ' + m.windGust + ' kt)';
         html += '</div>';
+        if (rwSource === 'ourairports') html += '<div class="range">Número de pista do banco comunitário (não confirmado ao vivo) — pode estar desatualizado por renumeração magnética.</div>';
       } else if (m.windDir !== null && !hasHeadings){
         html += '<div class="range">Sem número de pista confirmado para ' + code + ' — não é possível calcular a melhor pista. Peça pra eu confirmar o ICAO no AISWEB se quiser essa análise aqui.</div>';
       }
