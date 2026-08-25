@@ -970,6 +970,35 @@ const MCT_DATA = {"altitudes":[0,5000,10000],"temps":[-40,-30,-20,-10,0,10,20,30
     return out;
   }
 
+  // Dedicated lookup for runway DESIGNATORS (le/he) only — used for the METAR wind diagram.
+  // Always checks OurAirports when there's no manual override, since ROTAER never has designators
+  // (only length/elevation), unlike lookupIcaoRunways() above which is used for the TOFL calc.
+  async function lookupRunwayHeadings(code){
+    if (AIRPORT_OVERRIDES[code]){
+      const rw = AIRPORT_OVERRIDES[code].runways.find(r => r.le && r.he);
+      if (rw) return { ...rw, _source: 'override' };
+      return null;
+    }
+    const text = await fetchRunwaysCsv();
+    const needle = '"' + code + '"';
+    const lines = text.split('\n');
+    const out = [];
+    for (let i = 1; i < lines.length; i++){
+      const line = lines[i];
+      if (!line || line.indexOf(needle) === -1) continue;
+      const cols = csvSplit(line);
+      if (cols[2].toUpperCase() !== code) continue;
+      if (cols[7] === '1') continue;
+      const le = cols[8] || '', he = cols[14] || '';
+      if (!le || !he) continue;
+      const len = parseFloat(cols[3]);
+      out.push({ length_ft: isNaN(len) ? 0 : len, le, he, _source: 'ourairports' });
+    }
+    if (!out.length) return null;
+    out.sort((a,b) => b.length_ft - a.length_ft);
+    return out[0];
+  }
+
   async function lookupIcaoAirport(code){
     if (AIRPORT_OVERRIDES[code]){
       const o = AIRPORT_OVERRIDES[code];
@@ -1276,15 +1305,9 @@ const MCT_DATA = {"altitudes":[0,5000,10000],"temps":[-40,-30,-20,-10,0,10,20,30
       html += '<div class="metarStat"><div class="lbl">&nbsp;</div><div class="val" style="font-size:11px; color:var(--ink-dim);">' + (m.qnhInHg!==null ? m.qnhInHg.toFixed(2)+' inHg' : '') + '</div></div>';
       html += '</div>';
 
-      const override = AIRPORT_OVERRIDES[code];
-      let rw = null, rwSource = null;
-      if (override && override.runways.length && override.runways[0].le && override.runways[0].he){
-        rw = override.runways[0]; rwSource = 'override';
-      } else {
-        const fallbackRunways = await lookupIcaoRunways(code);
-        const withHeadings = fallbackRunways.find(r => r.le && r.he);
-        if (withHeadings){ rw = withHeadings; rwSource = withHeadings._source; }
-      }
+      const headingResult = await lookupRunwayHeadings(code);
+      const rw = headingResult;
+      const rwSource = headingResult ? headingResult._source : null;
       const hasHeadings = !!rw;
 
       if (hasHeadings && m.windDir !== null && !m.windVar){
