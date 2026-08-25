@@ -434,6 +434,18 @@
           </div>
         </div>
 
+        <div class="readout-grid" style="margin-bottom:16px;">
+          <div class="lcd">
+            <div class="lbl">V<span style="font-size:9px;">REF</span> <span style="text-transform:none;">(flap 30°)</span></div>
+            <div class="val" id="outVREF">—<span class="u">kt</span></div>
+          </div>
+          <div class="lcd">
+            <div class="lbl">V<span style="font-size:9px;">AC</span> <span style="text-transform:none;">(flap 10°)</span></div>
+            <div class="val" id="outVAC">—<span class="u">kt</span></div>
+          </div>
+        </div>
+        <div class="range" id="ldwNote" style="margin:-10px 0 16px;"></div>
+
         <div class="godial">
           <div class="title">Comparação com a pista</div>
           <div class="runwaybar">
@@ -473,6 +485,18 @@
             <div class="val" id="outN1b">—<span class="u">%</span></div>
           </div>
         </div>
+
+        <div class="readout-grid" style="margin-bottom:16px;">
+          <div class="lcd">
+            <div class="lbl">V<span style="font-size:9px;">REF</span> <span style="text-transform:none;">(flap 30°)</span></div>
+            <div class="val" id="outVREFb">—<span class="u">kt</span></div>
+          </div>
+          <div class="lcd">
+            <div class="lbl">V<span style="font-size:9px;">AC</span> <span style="text-transform:none;">(flap 10°)</span></div>
+            <div class="val" id="outVACb">—<span class="u">kt</span></div>
+          </div>
+        </div>
+        <div class="range" id="ldwNoteB" style="margin:-10px 0 16px;"></div>
 
         <div class="godial">
           <div class="title">Uso da pista neste peso</div>
@@ -662,7 +686,31 @@ const MCT_DATA = {"altitudes":[0,5000,10000],"temps":[-40,-30,-20,-10,0,10,20,30
     return { status:'ok', weight: lo, atLimit:false, TOFL: finalR.TOFL };
   }
 
-  window.TOFLCalc = { compute, maxWeightForRunway, WMIN, WMAX, AMIN, AMAX, TMIN, TMAX };
+  window.TOFLCalc = { compute, maxWeightForRunway, WMIN, WMAX, AMIN, AMAX, TMIN, TMAX, computeApproachSpeeds };
+
+  // ---- Approach / Approach Climb speeds (VREF Flaps 30°, VAC Flaps 10°) ----
+  // Source: Hawker Beechcraft 400A Pilot Checklist, "Approach and Approach Climb Speeds" table.
+  // Landing weight, not takeoff weight — assumes landing weight = takeoff weight - 300 lb (typical fuel burn).
+  const APPROACH_WEIGHTS = [11000,12000,13000,14000,15000,15700,16300]; // ascending, for bracket()
+  const APPROACH_VREF =    [97,102,106,110,114,117,119];
+  const APPROACH_VAC =     [119,124,128,132,136,139,141];
+  const LDW_MIN = 11000, LDW_MAX = 16300;
+
+  function computeApproachSpeeds(takeoffWeightLb){
+    const ldw = takeoffWeightLb - 300;
+    const ldwClamped = clamp(ldw, LDW_MIN, LDW_MAX);
+    const [w0,w1] = bracket(APPROACH_WEIGHTS, ldwClamped);
+    const i0 = APPROACH_WEIGHTS.indexOf(w0), i1 = APPROACH_WEIGHTS.indexOf(w1);
+    const vref = lerp(w0,w1, APPROACH_VREF[i0], APPROACH_VREF[i1], ldwClamped);
+    const vac = lerp(w0,w1, APPROACH_VAC[i0], APPROACH_VAC[i1], ldwClamped);
+    return {
+      landingWeight: ldw,
+      landingWeightClamped: ldwClamped,
+      VREF: Math.round(vref),
+      VAC: Math.round(vac),
+      _clamped: ldw !== ldwClamped
+    };
+  }
 })();
 
 
@@ -733,8 +781,16 @@ const MCT_DATA = {"altitudes":[0,5000,10000],"temps":[-40,-30,-20,-10,0,10,20,30
       $('outN1').innerHTML = '—<span class="u">%</span>';
       $('outTOFL').innerHTML = '—<span class="u">ft</span>';
       $('toflShadedBadge').classList.add('hidden');
+      $('outVREF').innerHTML = '—<span class="u">kt</span>';
+      $('outVAC').innerHTML = '—<span class="u">kt</span>';
+      $('ldwNote').textContent = '';
     } else {
       result = window.TOFLCalc.compute(flap, alt, weight, temp);
+
+      const appr = window.TOFLCalc.computeApproachSpeeds(weight);
+      $('outVREF').innerHTML = fmt(appr.VREF,0) + '<span class="u">kt</span>';
+      $('outVAC').innerHTML = fmt(appr.VAC,0) + '<span class="u">kt</span>';
+      $('ldwNote').textContent = 'Peso de pouso estimado: ' + Math.round(appr.landingWeight).toLocaleString('pt-BR') + ' lb (peso de decolagem − 300 lb)' + (appr._clamped ? ' — fora da faixa da tabela (11.000–16.300 lb), usando o limite mais próximo.' : '.');
 
       if (result._clampedWeight) notices.push('Peso fora da faixa tabelada (12.000–16.300 lb) — usando o limite mais próximo, sem extrapolar.');
       if (result._clampedAlt) notices.push('Altitude fora da faixa tabelada (0–4.000 ft) — usando o limite mais próximo, sem extrapolar.');
@@ -811,6 +867,9 @@ const MCT_DATA = {"altitudes":[0,5000,10000],"temps":[-40,-30,-20,-10,0,10,20,30
       ['outV1b','outVRb','outV2b'].forEach(id => $(id).innerHTML = '—<span class="u">kt</span>');
       $('outN1b').innerHTML = '—<span class="u">%</span>';
       $('weightShadedBadge').classList.add('hidden');
+      $('outVREFb').innerHTML = '—<span class="u">kt</span>';
+      $('outVACb').innerHTML = '—<span class="u">kt</span>';
+      $('ldwNoteB').textContent = '';
       fill.style.width = '0%'; fillLabel.textContent = '';
       status.className = 'status na'; status.textContent = 'SEM DADO';
       margin.textContent = 'Informe a pista disponível';
@@ -830,6 +889,9 @@ const MCT_DATA = {"altitudes":[0,5000,10000],"temps":[-40,-30,-20,-10,0,10,20,30
       ['outV1b','outVRb','outV2b'].forEach(id => $(id).innerHTML = '—<span class="u">kt</span>');
       $('outN1b').innerHTML = '—<span class="u">%</span>';
       $('weightShadedBadge').classList.add('hidden');
+      $('outVREFb').innerHTML = '—<span class="u">kt</span>';
+      $('outVACb').innerHTML = '—<span class="u">kt</span>';
+      $('ldwNoteB').textContent = '';
       fill.style.width = '100%'; fill.classList.add('over'); fillLabel.textContent = '';
       status.className = 'status nogo'; status.textContent = 'NO GO';
       margin.textContent = 'Pista insuficiente mesmo no peso mínimo tabelado (12.000 lb)' + (res.minTOFL ? ' — precisaria de ' + Math.round(res.minTOFL).toLocaleString('pt-BR') + ' ft.' : ', ou condição excede os limites de desempenho para este flap.');
@@ -848,6 +910,11 @@ const MCT_DATA = {"altitudes":[0,5000,10000],"temps":[-40,-30,-20,-10,0,10,20,30
     $('outVRb').innerHTML = fmt(Math.round(r.VR),0) + '<span class="u">kt</span>';
     $('outV2b').innerHTML = fmt(Math.round(r.V2),0) + '<span class="u">kt</span>';
     $('outN1b').innerHTML = (r.N1!==null ? fmt(r.N1,1) : '—') + '<span class="u">%</span>';
+
+    const apprB = window.TOFLCalc.computeApproachSpeeds(w);
+    $('outVREFb').innerHTML = fmt(apprB.VREF,0) + '<span class="u">kt</span>';
+    $('outVACb').innerHTML = fmt(apprB.VAC,0) + '<span class="u">kt</span>';
+    $('ldwNoteB').textContent = 'Peso de pouso estimado: ' + Math.round(apprB.landingWeight).toLocaleString('pt-BR') + ' lb (peso de decolagem − 300 lb)' + (apprB._clamped ? ' — fora da faixa da tabela (11.000–16.300 lb), usando o limite mais próximo.' : '.');
 
     const pct = Math.min(100, (r.TOFL / runway) * 100);
     fill.classList.remove('over');
