@@ -817,6 +817,19 @@ const MCT_DATA = {"altitudes":[0,5000,10000],"temps":[-40,-30,-20,-10,0,10,20,30
   let runwaysCsvPromise = null;
   let airportsCsvPromise = null;
 
+  // Manually confirmed corrections for airports where OurAirports is known to be outdated
+  // (e.g. runway redesignation due to magnetic drift). Checked before the network lookup.
+  // Sources: AISWEB/DECEA (official), cross-checked against SkyVector/Wikipedia for length/elevation.
+  const AIRPORT_OVERRIDES = {
+    'SBCH': {
+      name: 'Aeroporto de Chapecó — Serafin Enoss Bertaso',
+      elevation_ft: 2146,
+      runways: [
+        { length_ft: 6759, surface: 'ASPH', le: '12', he: '30' }
+      ]
+    }
+  };
+
   function fetchRunwaysCsv(){
     if (!runwaysCsvPromise){
       runwaysCsvPromise = fetch(RUNWAYS_CSV_URL).then(r=>{
@@ -861,6 +874,9 @@ const MCT_DATA = {"altitudes":[0,5000,10000],"temps":[-40,-30,-20,-10,0,10,20,30
   }
 
   async function lookupIcaoRunways(code){
+    if (AIRPORT_OVERRIDES[code]){
+      return AIRPORT_OVERRIDES[code].runways.map(r => ({ ...r, _override: true }));
+    }
     const text = await fetchRunwaysCsv();
     const needle = '"' + code + '"';
     const lines = text.split('\n');
@@ -880,6 +896,10 @@ const MCT_DATA = {"altitudes":[0,5000,10000],"temps":[-40,-30,-20,-10,0,10,20,30
   }
 
   async function lookupIcaoAirport(code){
+    if (AIRPORT_OVERRIDES[code]){
+      const o = AIRPORT_OVERRIDES[code];
+      return { name: o.name, municipality: '', elevation_ft: o.elevation_ft, _override: true };
+    }
     const text = await fetchAirportsCsv();
     const needle = '"' + code + '"';
     const lines = text.split('\n');
@@ -933,6 +953,7 @@ const MCT_DATA = {"altitudes":[0,5000,10000],"temps":[-40,-30,-20,-10,0,10,20,30
       ]);
 
       const statusParts = [];
+      if (AIRPORT_OVERRIDES[code]) statusParts.push('✓ Dados confirmados manualmente (AISWEB/DECEA) para ' + code + ' — mais confiáveis que o banco comunitário.');
 
       if (airport){
         if (airport.elevation_ft !== null){
@@ -1022,13 +1043,16 @@ const MCT_DATA = {"altitudes":[0,5000,10000],"temps":[-40,-30,-20,-10,0,10,20,30
     navigator.geolocation.getCurrentPosition(async (pos) => {
       statusEl.textContent = 'Buscando aeroporto mais próximo…';
       try {
+        const acc = pos.coords.accuracy; // meters
         const best = await findNearestAirport(pos.coords.latitude, pos.coords.longitude);
         btn.disabled = false;
+        const accKm = (acc/1000).toFixed(1);
+        const accNote = ' (precisão do GPS: ±' + accKm + ' km' + (acc > 5000 ? ' — baixa, pode estar puxando localização por rede/IP em vez de GPS real' : '') + ')';
         if (!best){
-          statusEl.textContent = 'Nenhum aeroporto encontrado perto de você.';
+          statusEl.textContent = 'Nenhum aeroporto encontrado perto de você.' + accNote;
           return;
         }
-        statusEl.textContent = 'Aeroporto mais próximo: ' + best.icao + ' (' + Math.round(best.dist) + ' nm) — ' + (best.name||'') + '.';
+        statusEl.textContent = 'Aeroporto mais próximo: ' + best.icao + ' (' + Math.round(best.dist) + ' nm) — ' + (best.name||'') + '.' + accNote;
         await doIcaoSearch(best.icao);
       } catch (err){
         btn.disabled = false;
