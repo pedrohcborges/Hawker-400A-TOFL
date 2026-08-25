@@ -1358,7 +1358,10 @@ const MCT_DATA = {"altitudes":[0,5000,10000],"temps":[-40,-30,-20,-10,0,10,20,30
     btn.textContent = 'Buscando METAR…';
     box.innerHTML = '<div class="range">Consultando METAR de ' + code + '…</div>';
     try {
-      const raw = await fetchMetar(code);
+      const [raw, fieldAirport] = await Promise.all([
+        fetchMetar(code),
+        lookupIcaoAirport(code).catch(() => null)
+      ]);
       if (!raw){
         box.innerHTML = '<div class="range">Sem METAR disponível para ' + code + ' — aeródromos menores geralmente não têm estação meteorológica automática. Informe altitude/OAT manualmente.</div>';
         return;
@@ -1401,9 +1404,9 @@ const MCT_DATA = {"altitudes":[0,5000,10000],"temps":[-40,-30,-20,-10,0,10,20,30
       $('metarApplyBtn').addEventListener('click', () => {
         if (m.tempC !== null) $('temp').value = m.tempC;
         if (m.qnhHpa !== null){
-          const elev = parseFloat($('alt').value);
-          if (!isNaN(elev)){
-            const pa = Math.round(elev + (1013.25 - m.qnhHpa) * 27);
+          const baseElev = (fieldAirport && fieldAirport.elevation_ft !== null) ? fieldAirport.elevation_ft : parseFloat($('qnhElev').value);
+          if (!isNaN(baseElev)){
+            const pa = Math.round(baseElev + (1013.25 - m.qnhHpa) * 27);
             $('alt').value = pa;
           }
         }
