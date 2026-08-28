@@ -340,7 +340,7 @@
             <button data-target="weight" data-step="-100">▼</button>
           </div>
         </div>
-        <div class="range">Faixa da tabela: 12.000 – 16.300 lb</div>
+        <div class="range">Faixa da tabela: 12.000 – 16.300 lb (acima disso, estimativa extrapolada — ver aviso)</div>
       </div>
 
       <div class="field">
@@ -545,6 +545,7 @@ const MCT_DATA = {"altitudes":[0,5000,10000],"temps":[-40,-30,-20,-10,0,10,20,30
   const ALTS = [0,1000,2000,3000,4000,5000,6000,7000,8000,9000,10000];
   const WEIGHTS = [12000,12500,13000,13500,14000,14500,15000,15500,16000,16300];
   const WMIN = 12000, WMAX = 16300;
+  const WEXTRAMAX = 18000; // limite superior da extrapolação — apenas estimativa matemática, sem base no AFM
   const AMIN = 0, AMAX = 10000;
   const TMIN = -40, TMAX = 50;
 
@@ -578,7 +579,15 @@ const MCT_DATA = {"altitudes":[0,5000,10000],"temps":[-40,-30,-20,-10,0,10,20,30
     const flapData = TOFL_DATA[flap];
     if (!flapData || !flapData[String(alt)]) return null;
     const altTable = flapData[String(alt)];
-    const [w0,w1] = bracket(WEIGHTS, weight);
+    let w0, w1;
+    if (weight > WMAX){
+      // Extrapolação linear além do peso máximo certificado (16.300 lb), usando a
+      // tendência dos dois últimos pontos tabelados (16.000 e 16.300 lb). Não é dado do AFM.
+      w0 = WEIGHTS[WEIGHTS.length-2];
+      w1 = WEIGHTS[WEIGHTS.length-1];
+    } else {
+      [w0, w1] = bracket(WEIGHTS, weight);
+    }
     const t0 = altTable[String(w0)];
     const t1 = altTable[String(w1)];
     const v0 = tempInterp(t0, temp, field);
@@ -619,7 +628,7 @@ const MCT_DATA = {"altitudes":[0,5000,10000],"temps":[-40,-30,-20,-10,0,10,20,30
   }
 
   function compute(flap, altitudeFt, weightLb, tempC){
-    const w = clamp(weightLb, WMIN, WMAX);
+    const w = clamp(weightLb, WMIN, WEXTRAMAX);
     const a = clamp(altitudeFt, AMIN, AMAX);
     const t = clamp(tempC, TMIN, TMAX);
 
@@ -635,11 +644,12 @@ const MCT_DATA = {"altitudes":[0,5000,10000],"temps":[-40,-30,-20,-10,0,10,20,30
       out[f] = v;
     }
     out._exceeds = anyNull;
-    out._shadedArea = anyCornerShaded(flap, altitudeFt, weightLb, tempC);
+    out._shadedArea = anyCornerShaded(flap, Math.min(altitudeFt, AMAX), Math.min(w, WMAX), tempC);
     out.N1 = n1Interp(flap, a, t);
     out._clampedWeight = (weightLb !== w);
     out._clampedAlt = (altitudeFt !== a);
     out._clampedTemp = (tempC !== t);
+    out._extrapolatedWeight = (w > WMAX);
     return out;
   }
 
@@ -691,7 +701,7 @@ const MCT_DATA = {"altitudes":[0,5000,10000],"temps":[-40,-30,-20,-10,0,10,20,30
     return { status:'ok', weight: lo, atLimit:false, TOFL: finalR.TOFL };
   }
 
-  window.TOFLCalc = { compute, maxWeightForRunway, WMIN, WMAX, AMIN, AMAX, TMIN, TMAX, computeApproachSpeeds };
+  window.TOFLCalc = { compute, maxWeightForRunway, WMIN, WMAX, WEXTRAMAX, AMIN, AMAX, TMIN, TMAX, computeApproachSpeeds };
 
   // ---- Approach / Approach Climb speeds (VREF Flaps 30°, VAC Flaps 10°) ----
   // Source: Hawker Beechcraft 400A Pilot Checklist, "Approach and Approach Climb Speeds" table.
@@ -797,7 +807,8 @@ const MCT_DATA = {"altitudes":[0,5000,10000],"temps":[-40,-30,-20,-10,0,10,20,30
       $('outVAC').innerHTML = fmt(appr.VAC,0) + '<span class="u">kt</span>';
       $('ldwNote').textContent = 'Peso de pouso estimado: ' + Math.round(appr.landingWeight).toLocaleString('pt-BR') + ' lb (peso de decolagem − 300 lb)' + (appr._clamped ? ' — fora da faixa da tabela (11.000–16.300 lb), usando o limite mais próximo.' : '.');
 
-      if (result._clampedWeight) notices.push('Peso fora da faixa tabelada (12.000–16.300 lb) — usando o limite mais próximo, sem extrapolar.');
+      if (result._clampedWeight) notices.push('Peso fora da faixa (12.000–18.000 lb) — usando o limite mais próximo.');
+      if (result._extrapolatedWeight) notices.push('<b>⚠ Peso acima de 16.300 lb (máximo estrutural certificado).</b> Os valores acima desse peso são <b>extrapolação matemática</b> (tendência linear entre 16.000 e 16.300 lb) — não existem no AFM e não representam uma decolagem certificada/legal. Use apenas como estimativa de referência, nunca para despacho real.');
       if (result._clampedAlt) notices.push('Altitude fora da faixa tabelada (0–10.000 ft) — usando o limite mais próximo, sem extrapolar.');
       if (result._clampedTemp) notices.push('OAT fora da faixa tabelada (-40°C a 50°C) — usando o limite mais próximo, sem extrapolar.');
       if (result._shadedArea && !result._exceeds) notices.push('<b>Shaded Area.</b> Esta condição cai numa área sombreada da tabela original do AFM — o manual não detalha o motivo nas páginas fornecidas, mas normalmente indica uma restrição adicional (ex: performance limitada por subida/obstáculo, não apenas pelo comprimento de pista). Consulte a nota correspondente no AFM antes de usar operacionalmente.');
@@ -849,7 +860,7 @@ const MCT_DATA = {"altitudes":[0,5000,10000],"temps":[-40,-30,-20,-10,0,10,20,30
 
     const box = $('noticeBox');
     if (notices.length){
-      const crit = result && result._exceeds;
+      const crit = (result && result._exceeds) || (result && result._extrapolatedWeight);
       box.innerHTML = '<div class="notice ' + (crit ? 'crit' : '') + '">' + notices.map(n=>'&bull; '+n).join('<br>') + '</div>';
     } else {
       box.innerHTML = '';
